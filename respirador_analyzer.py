@@ -1082,23 +1082,118 @@ def main():
         # Generar descarga
         st.header("💾 Descargar Resultados Completos")
         
-        # Preparar DataFrame principal
+        # Preparar DataFrame COMPLETO (Data Report original + nuevas columnas)
+        df_completo = st.session_state.df_original.copy()
+        
+        # Agregar nuevas columnas con valores por defecto
+        nuevas_columnas = {
+            'Respirador_Requerido': 'No analizado',
+            'Criticidad': '',
+            'Tipo_Sistema': '',
+            'CFM_Requerido': '',
+            'CFM_Rango': '',
+            'Modelo_Recomendado': '',
+            'Serie_Recomendada': '',
+            'Cartucho_Recomendado': '',
+            'Altura_Requerida': '',
+            'Espacio_Disponible': '',
+            'Margen_Espacio': '',
+            'Margen_CFM': '',
+            'Prioridad': '',
+            'Robustez': '',
+            'Variacion_CFM_Pct': '',
+            'Total_Iteraciones': '',
+            'Modelo_Post_Modificaciones': '',
+            'Serie_Post_Modificaciones': '',
+            'Cartucho_Post_Modificaciones': '',
+            'Altura_Post_Modificaciones': '',
+            'CFM_Capacidad_Post_Modificaciones': '',
+            'Modificaciones_Requeridas': '',
+            'Status_Analisis': 'No analizado'
+        }
+        
+        for col in nuevas_columnas:
+            df_completo[col] = nuevas_columnas[col]
+        
+        # Actualizar registros analizados con resultados
+        for resultado in resultados_completos:
+            if 'error' in resultado:
+                # Buscar registro en el DataFrame original
+                mask = (df_completo['Machine'] == resultado['machine']) & (df_completo['Component'] == resultado['component'])
+                indices = df_completo[mask].index
+                
+                if len(indices) > 0:
+                    idx_principal = indices[0]  # Tomar el primer match
+                    df_completo.loc[idx_principal, 'Respirador_Requerido'] = 'Error en análisis'
+                    df_completo.loc[idx_principal, 'Status_Analisis'] = resultado['error']
+                continue
+            
+            rec = resultado['recomendacion']
+            
+            # Buscar registro principal en el DataFrame original
+            mask = (df_completo['Machine'] == resultado['machine']) & (df_completo['Component'] == resultado['component'])
+            indices = df_completo[mask].index
+            
+            if len(indices) > 0:
+                # Actualizar registro principal (priorizar el que tiene Oil Capacity)
+                registros_candidatos = df_completo.loc[indices]
+                idx_principal = indices[0]  # Por defecto el primer match
+                
+                # Buscar el que tiene Oil Capacity si hay múltiples
+                registros_con_aceite = registros_candidatos[registros_candidatos['(D) Oil Capacity'].fillna(0) > 0]
+                if len(registros_con_aceite) > 0:
+                    idx_principal = registros_con_aceite.index[0]
+                
+                # Actualizar con resultados del análisis
+                df_completo.loc[idx_principal, 'Respirador_Requerido'] = 'Sí'
+                df_completo.loc[idx_principal, 'Criticidad'] = rec['criticidad']
+                df_completo.loc[idx_principal, 'Tipo_Sistema'] = resultado['tipo_sistema']
+                df_completo.loc[idx_principal, 'CFM_Requerido'] = rec['cfm_requerido']
+                df_completo.loc[idx_principal, 'CFM_Rango'] = rec['cfm_rango']
+                df_completo.loc[idx_principal, 'Modelo_Recomendado'] = rec['modelo_recomendado']
+                df_completo.loc[idx_principal, 'Serie_Recomendada'] = rec['serie_recomendada']
+                df_completo.loc[idx_principal, 'Cartucho_Recomendado'] = rec['cartucho']
+                df_completo.loc[idx_principal, 'Altura_Requerida'] = rec['altura_requerida']
+                df_completo.loc[idx_principal, 'Espacio_Disponible'] = rec['espacio_disponible']
+                df_completo.loc[idx_principal, 'Margen_Espacio'] = rec['margen_espacio']
+                df_completo.loc[idx_principal, 'Margen_CFM'] = rec['margen_cfm']
+                df_completo.loc[idx_principal, 'Prioridad'] = rec['prioridad']
+                df_completo.loc[idx_principal, 'Robustez'] = rec['robustez']
+                df_completo.loc[idx_principal, 'Variacion_CFM_Pct'] = resultado['cfm_data']['variacion_porcentual'] if resultado['cfm_data'] else 'N/A'
+                df_completo.loc[idx_principal, 'Total_Iteraciones'] = resultado['cfm_data']['total_iteraciones'] if resultado['cfm_data'] else 'N/A'
+                df_completo.loc[idx_principal, 'Status_Analisis'] = 'Completado'
+                
+                # Información post-modificaciones si existe
+                if rec.get('recomendacion_post_modificaciones'):
+                    post_rec = rec['recomendacion_post_modificaciones']
+                    df_completo.loc[idx_principal, 'Modelo_Post_Modificaciones'] = post_rec['modelo']
+                    df_completo.loc[idx_principal, 'Serie_Post_Modificaciones'] = post_rec['serie']
+                    df_completo.loc[idx_principal, 'Cartucho_Post_Modificaciones'] = post_rec['cartucho']
+                    df_completo.loc[idx_principal, 'Altura_Post_Modificaciones'] = f"{post_rec['altura']}\""
+                    df_completo.loc[idx_principal, 'CFM_Capacidad_Post_Modificaciones'] = post_rec['cfm_capacidad']
+                
+                # Modificaciones requeridas
+                if resultado['modificaciones']:
+                    modificaciones_texto = " | ".join(resultado['modificaciones'])
+                    df_completo.loc[idx_principal, 'Modificaciones_Requeridas'] = modificaciones_texto
+                
+                # Marcar registros secundarios del mismo equipo
+                for idx_sec in indices:
+                    if idx_sec != idx_principal:
+                        df_completo.loc[idx_sec, 'Respirador_Requerido'] = f'Ver registro principal ({resultado["component"]})'
+                        df_completo.loc[idx_sec, 'Status_Analisis'] = 'Registro secundario'
+        
+        # Preparar datos adicionales para hojas separadas
         resumen_data = []
         iteraciones_data = []
         modificaciones_data = []
         
         for resultado in resultados_completos:
             if 'error' in resultado:
-                resumen_data.append({
-                    'Machine': resultado['machine'],
-                    'Component': resultado['component'],
-                    'Status': 'ERROR',
-                    'Error': resultado['error']
-                })
                 continue
             
             rec = resultado['recomendacion']
-            # Información básica
+            # Información básica para hoja de resumen
             row_data = {
                 'Machine': resultado['machine'],
                 'Component': resultado['component'],
@@ -1167,9 +1262,13 @@ def main():
         # Crear archivo Excel completo
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Hoja principal con resumen
-            resumen_df = pd.DataFrame(resumen_data)
-            resumen_df.to_excel(writer, sheet_name='Resumen_Completo_v2.2', index=False)
+            # HOJA PRINCIPAL: Data Report completo con nuevas columnas
+            df_completo.to_excel(writer, sheet_name='Data_Report_Completo_v2.2', index=False)
+            
+            # Hoja de resumen solo equipos con respiradores
+            if resumen_data:
+                resumen_df = pd.DataFrame(resumen_data)
+                resumen_df.to_excel(writer, sheet_name='Resumen_Respiradores', index=False)
             
             # Hoja de modificaciones
             if modificaciones_data:
@@ -1188,20 +1287,33 @@ def main():
                 ['Factor seguridad CFM', factor_seguridad, 'multiplicador'],
                 ['Porcentajes aceite iterados', ', '.join(map(str, porcentajes_aceite)), '%'],
                 ['Tiempos expansión iterados', ', '.join(map(str, tiempos_expansion)), 'min'],
-                ['Total equipos analizados', len(resultados_completos), 'unidades'],
-                ['Equipos con recomendación directa', equipos_con_recomendacion, 'unidades'],
-                ['Equipos que requieren modificaciones', equipos_requieren_modificaciones, 'unidades'],
-                ['Resultados robustos (var <15%)', equipos_robustos, 'unidades']
+                ['Total registros en data report', len(df_completo), 'registros'],
+                ['Equipos candidatos identificados', len(st.session_state.equipos_candidatos), 'equipos'],
+                ['Equipos analizados', len(resultados_completos), 'equipos'],
+                ['Equipos con recomendación directa', equipos_con_recomendacion, 'equipos'],
+                ['Equipos que requieren modificaciones', equipos_requieren_modificaciones, 'equipos'],
+                ['Resultados robustos (var <15%)', equipos_robustos, 'equipos']
             ]
             parametros_df = pd.DataFrame(parametros_data, columns=['Parámetro', 'Valor', 'Unidad'])
             parametros_df.to_excel(writer, sheet_name='Parametros_Analisis', index=False)
         
         output.seek(0)
         
+        # Información del archivo
+        total_registros = len(df_completo)
+        registros_analizados = len([r for r in resultados_completos if 'error' not in r])
+        
+        st.info(f"""
+        📊 **Archivo generado:**
+        - **Total registros**: {total_registros} (Data Report completo)
+        - **Equipos analizados**: {registros_analizados} con recomendaciones de respiradores
+        - **Nuevas columnas**: {len(nuevas_columnas)} agregadas al Data Report original
+        """)
+        
         st.download_button(
-            label="📥 Descargar Análisis Completo Final v2.2",
+            label="📥 Descargar Data Report Completo + Análisis Respiradores v2.2",
             data=output.getvalue(),
-            file_name=f"respiradores_analisis_final_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            file_name=f"data_report_completo_respiradores_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
